@@ -1,67 +1,207 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 import Icon from '@/components/ui/icon';
+
+const API_CHATS = 'https://functions.poehali.dev/f0e36f84-8530-4379-bdaa-3ca508a964d3';
+const API_MESSAGES = 'https://functions.poehali.dev/7bb6449d-2a34-4d2f-aae3-df9fd11ba4b2';
 
 interface Message {
   id: string;
   text: string;
   sender: 'me' | 'other';
-  timestamp: Date;
+  timestamp: string;
   encrypted: boolean;
 }
 
 interface Chat {
-  id: string;
+  id: number;
+  chat_code?: string;
   name: string;
   lastMessage: string;
-  timestamp: Date;
+  timestamp: string;
   unread: number;
   avatar: string;
   online: boolean;
 }
 
-const mockChats: Chat[] = [
-  { id: '1', name: 'Анонимный пользователь #1247', lastMessage: 'Привет! Как дела?', timestamp: new Date(Date.now() - 5 * 60000), unread: 2, avatar: 'A1', online: true },
-  { id: '2', name: 'Анонимный пользователь #8392', lastMessage: 'Спасибо за информацию', timestamp: new Date(Date.now() - 30 * 60000), unread: 0, avatar: 'A8', online: false },
-  { id: '3', name: 'Анонимный пользователь #5521', lastMessage: 'До встречи!', timestamp: new Date(Date.now() - 120 * 60000), unread: 1, avatar: 'A5', online: true },
-  { id: '4', name: 'Анонимный пользователь #9156', lastMessage: 'Отлично, договорились', timestamp: new Date(Date.now() - 240 * 60000), unread: 0, avatar: 'A9', online: false },
-];
-
-const mockMessages: Message[] = [
-  { id: '1', text: 'Привет! Как дела?', sender: 'other', timestamp: new Date(Date.now() - 10 * 60000), encrypted: true },
-  { id: '2', text: 'Привет! Всё отлично, спасибо! А у тебя?', sender: 'me', timestamp: new Date(Date.now() - 8 * 60000), encrypted: true },
-  { id: '3', text: 'Тоже хорошо! Хотел спросить про тот проект', sender: 'other', timestamp: new Date(Date.now() - 5 * 60000), encrypted: true },
-  { id: '4', text: 'Да, конечно! Что именно интересует?', sender: 'me', timestamp: new Date(Date.now() - 3 * 60000), encrypted: true },
-];
+interface User {
+  id: number;
+  anonymous_id: string;
+  display_name: string;
+  avatar_code: string;
+}
 
 const Index = () => {
   const [activeSection, setActiveSection] = useState<'chats' | 'history' | 'settings' | 'profile' | 'notifications'>('chats');
-  const [selectedChat, setSelectedChat] = useState<Chat | null>(mockChats[0]);
-  const [messages, setMessages] = useState<Message[]>(mockMessages);
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showNewChatDialog, setShowNewChatDialog] = useState(false);
+  const [newChatCode, setNewChatCode] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
-    
-    const message: Message = {
-      id: Date.now().toString(),
-      text: newMessage,
-      sender: 'me',
-      timestamp: new Date(),
-      encrypted: true,
-    };
-    
-    setMessages([...messages, message]);
-    setNewMessage('');
+  useEffect(() => {
+    initUser();
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadChats();
+      const interval = setInterval(loadChats, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (selectedChat && currentUser) {
+      loadMessages(selectedChat.id);
+      const interval = setInterval(() => loadMessages(selectedChat.id), 3000);
+      return () => clearInterval(interval);
+    }
+  }, [selectedChat, currentUser]);
+
+  const initUser = async () => {
+    const user = localStorage.getItem('chat_user');
+    if (user) {
+      setCurrentUser(JSON.parse(user));
+      return;
+    }
+
+    try {
+      const response = await fetch(API_CHATS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_user' })
+      });
+      const data = await response.json();
+      setCurrentUser(data);
+      localStorage.setItem('chat_user', JSON.stringify(data));
+    } catch (error) {
+      console.error('Failed to create user:', error);
+      toast({ title: 'Ошибка', description: 'Не удалось создать пользователя', variant: 'destructive' });
+    }
   };
 
-  const formatTime = (date: Date) => {
+  const loadChats = async () => {
+    if (!currentUser) return;
+    try {
+      const response = await fetch(`${API_CHATS}?user_id=${currentUser.id}`);
+      const data = await response.json();
+      setChats(data);
+    } catch (error) {
+      console.error('Failed to load chats:', error);
+    }
+  };
+
+  const loadMessages = async (chatId: number) => {
+    if (!currentUser) return;
+    try {
+      const response = await fetch(`${API_MESSAGES}?chat_id=${chatId}&user_id=${currentUser.id}`);
+      const data = await response.json();
+      setMessages(data);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedChat || !currentUser) return;
+    
+    try {
+      const response = await fetch(API_MESSAGES, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: selectedChat.id,
+          user_id: currentUser.id,
+          content: newMessage
+        })
+      });
+      
+      if (response.ok) {
+        setNewMessage('');
+        loadMessages(selectedChat.id);
+        loadChats();
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast({ title: 'Ошибка', description: 'Не удалось отправить сообщение', variant: 'destructive' });
+    }
+  };
+
+  const handleCreateChat = async () => {
+    if (!currentUser) return;
+    setIsLoading(true);
+    
+    try {
+      const response = await fetch(API_CHATS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_chat',
+          user_id: currentUser.id
+        })
+      });
+      
+      const data = await response.json();
+      setNewChatCode(data.chat_code);
+      toast({ 
+        title: 'Чат создан!', 
+        description: `Код для приглашения: ${data.chat_code}. Отправьте его собеседнику.` 
+      });
+      loadChats();
+    } catch (error) {
+      console.error('Failed to create chat:', error);
+      toast({ title: 'Ошибка', description: 'Не удалось создать чат', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinChat = async () => {
+    if (!currentUser || !newChatCode.trim()) return;
+    setIsLoading(true);
+    
+    try {
+      const response = await fetch(API_CHATS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'join_chat',
+          user_id: currentUser.id,
+          chat_code: newChatCode.trim()
+        })
+      });
+      
+      if (response.ok) {
+        toast({ title: 'Успешно!', description: 'Вы присоединились к чату' });
+        setShowNewChatDialog(false);
+        setNewChatCode('');
+        loadChats();
+      } else {
+        toast({ title: 'Ошибка', description: 'Чат не найден', variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Failed to join chat:', error);
+      toast({ title: 'Ошибка', description: 'Не удалось присоединиться к чату', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -72,7 +212,7 @@ const Index = () => {
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
   };
 
-  const filteredChats = mockChats.filter(chat =>
+  const filteredChats = chats.filter(chat =>
     chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -88,7 +228,9 @@ const Index = () => {
               </div>
               <div>
                 <h1 className="text-lg font-semibold text-sidebar-foreground">SecureChat</h1>
-                <p className="text-xs text-muted-foreground">Анонимно и безопасно</p>
+                <p className="text-xs text-muted-foreground">
+                  {currentUser ? currentUser.display_name : 'Загрузка...'}
+                </p>
               </div>
             </div>
           )}
@@ -151,7 +293,12 @@ const Index = () => {
         <div className="p-4 border-b border-border">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold text-card-foreground">Чаты</h2>
-            <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-primary">
+            <Button 
+              size="icon" 
+              variant="ghost" 
+              className="text-muted-foreground hover:text-primary"
+              onClick={() => setShowNewChatDialog(true)}
+            >
               <Icon name="Plus" size={20} />
             </Button>
           </div>
@@ -168,6 +315,13 @@ const Index = () => {
 
         <ScrollArea className="flex-1">
           <div className="p-2">
+            {filteredChats.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Icon name="MessageSquare" size={40} className="mx-auto mb-2 opacity-50" />
+                <p>Нет активных чатов</p>
+                <p className="text-sm">Создайте новый чат</p>
+              </div>
+            )}
             {filteredChats.map((chat) => (
               <div
                 key={chat.id}
@@ -314,6 +468,54 @@ const Index = () => {
           </div>
         )}
       </div>
+
+      <Dialog open={showNewChatDialog} onOpenChange={setShowNewChatDialog}>
+        <DialogContent className="bg-card text-card-foreground">
+          <DialogHeader>
+            <DialogTitle>Создать или присоединиться к чату</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Создайте новый чат и получите код для приглашения или введите код существующего чата
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <Button 
+              onClick={handleCreateChat} 
+              disabled={isLoading}
+              className="w-full bg-primary text-primary-foreground"
+            >
+              <Icon name="Plus" size={18} className="mr-2" />
+              Создать новый чат
+            </Button>
+            
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">или</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Input
+                placeholder="Введите код чата"
+                value={newChatCode}
+                onChange={(e) => setNewChatCode(e.target.value)}
+                className="bg-background border-input"
+              />
+              <Button 
+                onClick={handleJoinChat} 
+                disabled={isLoading || !newChatCode.trim()}
+                variant="outline"
+                className="w-full"
+              >
+                <Icon name="LogIn" size={18} className="mr-2" />
+                Присоединиться к чату
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

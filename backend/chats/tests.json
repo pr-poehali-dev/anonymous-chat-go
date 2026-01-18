@@ -1,0 +1,35 @@
+{
+  "tests": [
+    {
+      "name": "Create new user",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "create_user"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "id": "number",
+        "anonymous_id": "string",
+        "display_name": "string",
+        "avatar_code": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Create new chat",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "create_chat",
+        "user_id": 1
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "id": "number",
+        "chat_code": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
